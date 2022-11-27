@@ -650,7 +650,8 @@ void GDScriptAnalyzer::resolve_class_interface(GDScriptParser::ClassNode *p_clas
 				datatype.type_source = GDScriptParser::DataType::UNDETECTED;
 
 				GDScriptParser::DataType specified_type;
-				if (member.variable->datatype_specifier != nullptr) {
+				bool has_specified_type = member.variable->datatype_specifier != nullptr;
+				if (has_specified_type) {
 					specified_type = resolve_datatype(member.variable->datatype_specifier);
 					specified_type.is_meta_type = false;
 				}
@@ -658,13 +659,9 @@ void GDScriptAnalyzer::resolve_class_interface(GDScriptParser::ClassNode *p_clas
 				if (member.variable->initializer != nullptr) {
 					member.variable->set_datatype(datatype); // Allow recursive usage.
 					reduce_expression(member.variable->initializer);
-					if ((member.variable->infer_datatype || (member.variable->datatype_specifier != nullptr && specified_type.has_container_element_type())) && member.variable->initializer->type == GDScriptParser::Node::ARRAY) {
-						// Typed array.
+					if (member.variable->initializer->type == GDScriptParser::Node::ARRAY && (member.variable->infer_datatype || (has_specified_type && specified_type.has_container_element_type()))) {
 						GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(member.variable->initializer);
-						// Can only infer typed array if it has elements.
-						if ((member.variable->infer_datatype && array->elements.size() > 0) || member.variable->datatype_specifier != nullptr) {
-							update_array_literal_element_type(specified_type, array);
-						}
+						update_array_literal_element_type(array, has_specified_type ? &specified_type : nullptr);
 					}
 					datatype = member.variable->initializer->get_datatype();
 					if (datatype.type_source != GDScriptParser::DataType::UNDETECTED) {
@@ -733,8 +730,8 @@ void GDScriptAnalyzer::resolve_class_interface(GDScriptParser::ClassNode *p_clas
 				reduce_expression(member.constant->initializer);
 
 				GDScriptParser::DataType specified_type;
-
-				if (member.constant->datatype_specifier != nullptr) {
+				bool has_specified_type = member.constant->datatype_specifier != nullptr;
+				if (has_specified_type) {
 					specified_type = resolve_datatype(member.constant->datatype_specifier);
 					specified_type.is_meta_type = false;
 				}
@@ -744,12 +741,8 @@ void GDScriptAnalyzer::resolve_class_interface(GDScriptParser::ClassNode *p_clas
 					datatype = member.constant->initializer->get_datatype();
 					if (member.constant->initializer->type == GDScriptParser::Node::ARRAY) {
 						GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(member.constant->initializer);
+						update_array_literal_element_type(array, has_specified_type ? &specified_type : nullptr);
 						const_fold_array(array);
-
-						// Can only infer typed array if it has elements.
-						if (array->elements.size() > 0 || (member.constant->datatype_specifier != nullptr && specified_type.has_container_element_type())) {
-							update_array_literal_element_type(specified_type, array);
-						}
 					} else if (member.constant->initializer->type == GDScriptParser::Node::DICTIONARY) {
 						const_fold_dictionary(static_cast<GDScriptParser::DictionaryNode *>(member.constant->initializer));
 					}
@@ -758,7 +751,7 @@ void GDScriptAnalyzer::resolve_class_interface(GDScriptParser::ClassNode *p_clas
 						push_error(R"(Initializer for a constant must be a constant expression.)", member.constant->initializer);
 					}
 
-					if (member.constant->datatype_specifier != nullptr) {
+					if (has_specified_type) {
 						datatype = specified_type;
 
 						if (!is_type_compatible(datatype, member.constant->initializer->get_datatype(), true)) {
@@ -1474,20 +1467,17 @@ void GDScriptAnalyzer::resolve_variable(GDScriptParser::VariableNode *p_variable
 	type.kind = GDScriptParser::DataType::VARIANT; // By default.
 
 	GDScriptParser::DataType specified_type;
-	if (p_variable->datatype_specifier != nullptr) {
+	bool has_specified_type = p_variable->datatype_specifier != nullptr;
+	if (has_specified_type) {
 		specified_type = resolve_datatype(p_variable->datatype_specifier);
 		specified_type.is_meta_type = false;
 	}
 
 	if (p_variable->initializer != nullptr) {
 		reduce_expression(p_variable->initializer);
-		if ((p_variable->infer_datatype || (p_variable->datatype_specifier != nullptr && specified_type.has_container_element_type())) && p_variable->initializer->type == GDScriptParser::Node::ARRAY) {
-			// Typed array.
+		if (p_variable->initializer->type == GDScriptParser::Node::ARRAY && (p_variable->infer_datatype || (has_specified_type && specified_type.has_container_element_type()))) {
 			GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(p_variable->initializer);
-			// Can only infer typed array if it has elements.
-			if ((p_variable->infer_datatype && array->elements.size() > 0) || p_variable->datatype_specifier != nullptr) {
-				update_array_literal_element_type(specified_type, array);
-			}
+			update_array_literal_element_type(array, has_specified_type ? &specified_type : nullptr);
 		}
 
 		type = p_variable->initializer->get_datatype();
@@ -1512,7 +1502,7 @@ void GDScriptAnalyzer::resolve_variable(GDScriptParser::VariableNode *p_variable
 #endif
 	}
 
-	if (p_variable->datatype_specifier != nullptr) {
+	if (has_specified_type) {
 		type = specified_type;
 		type.is_meta_type = false;
 
@@ -1562,7 +1552,8 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 	GDScriptParser::DataType type;
 
 	GDScriptParser::DataType explicit_type;
-	if (p_constant->datatype_specifier != nullptr) {
+	bool has_explicit_type = p_constant->datatype_specifier != nullptr;
+	if (has_explicit_type) {
 		explicit_type = resolve_datatype(p_constant->datatype_specifier);
 		explicit_type.is_meta_type = false;
 	}
@@ -1571,12 +1562,8 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 		reduce_expression(p_constant->initializer);
 		if (p_constant->initializer->type == GDScriptParser::Node::ARRAY) {
 			GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(p_constant->initializer);
+			update_array_literal_element_type(array, has_explicit_type ? &explicit_type : nullptr);
 			const_fold_array(array);
-
-			// Can only infer typed array if it has elements.
-			if (array->elements.size() > 0 || (p_constant->datatype_specifier != nullptr && explicit_type.has_container_element_type())) {
-				update_array_literal_element_type(explicit_type, array);
-			}
 		} else if (p_constant->initializer->type == GDScriptParser::Node::DICTIONARY) {
 			const_fold_dictionary(static_cast<GDScriptParser::DictionaryNode *>(p_constant->initializer));
 		}
@@ -1594,7 +1581,7 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 #endif
 	}
 
-	if (p_constant->datatype_specifier != nullptr) {
+	if (has_explicit_type) {
 		if (!is_type_compatible(explicit_type, type)) {
 			push_error(vformat(R"(Assigned value for constant "%s" has type %s which is not compatible with defined type %s.)", p_constant->identifier->name, type.to_string(), explicit_type.to_string()), p_constant->initializer);
 #ifdef DEBUG_ENABLED
@@ -1772,20 +1759,15 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 	GDScriptParser::DataType result;
 
 	GDScriptParser::DataType expected_type;
-	bool has_expected_type = false;
-
-	if (parser->current_function != nullptr) {
+	bool has_expected_type = parser->current_function != nullptr;
+	if (has_expected_type) {
 		expected_type = parser->current_function->get_datatype();
-		has_expected_type = true;
 	}
 
 	if (p_return->return_value != nullptr) {
 		reduce_expression(p_return->return_value);
-		if (p_return->return_value->type == GDScriptParser::Node::ARRAY) {
-			// Check if assigned value is an array literal, so we can make it a typed array too if appropriate.
-			if (has_expected_type && expected_type.has_container_element_type() && p_return->return_value->type == GDScriptParser::Node::ARRAY) {
-				update_array_literal_element_type(expected_type, static_cast<GDScriptParser::ArrayNode *>(p_return->return_value));
-			}
+		if (p_return->return_value->type == GDScriptParser::Node::ARRAY && has_expected_type && expected_type.has_container_element_type()) {
+			update_array_literal_element_type(static_cast<GDScriptParser::ArrayNode *>(p_return->return_value), &expected_type);
 		}
 		result = p_return->return_value->get_datatype();
 	} else {
@@ -1929,49 +1911,50 @@ void GDScriptAnalyzer::reduce_array(GDScriptParser::ArrayNode *p_array) {
 
 // When an array literal is stored (or passed as function argument) to a typed context, we then assume the array is typed.
 // This function determines which type is that (if any).
-void GDScriptAnalyzer::update_array_literal_element_type(const GDScriptParser::DataType &p_base_type, GDScriptParser::ArrayNode *p_array_literal) {
-	GDScriptParser::DataType array_type = p_array_literal->get_datatype();
-	if (p_array_literal->elements.size() == 0) {
-		// Empty array literal, just make the same type as the storage.
-		array_type.set_container_element_type(p_base_type.get_container_element_type());
-	} else {
-		// Check if elements match.
-		bool all_same_type = true;
-		bool all_have_type = true;
+void GDScriptAnalyzer::update_array_literal_element_type(GDScriptParser::ArrayNode *p_array, const GDScriptParser::DataType *p_base_type) {
+	GDScriptParser::DataType array_type = p_array->get_datatype();
 
-		GDScriptParser::DataType element_type;
-		for (int i = 0; i < p_array_literal->elements.size(); i++) {
-			if (i == 0) {
-				element_type = p_array_literal->elements[0]->get_datatype();
-			} else {
-				GDScriptParser::DataType this_element_type = p_array_literal->elements[i]->get_datatype();
-				if (this_element_type.has_no_type()) {
-					all_same_type = false;
-					all_have_type = false;
-					break;
-				} else if (element_type != this_element_type) {
-					if (!is_type_compatible(element_type, this_element_type, false)) {
-						if (is_type_compatible(this_element_type, element_type, false)) {
-							// This element is a super-type to the previous type, so we use the super-type.
-							element_type = this_element_type;
-						} else {
-							// It's incompatible.
-							all_same_type = false;
-							break;
-						}
-					}
-				}
-			}
-		}
-		if (all_same_type) {
-			element_type.is_constant = false;
-			array_type.set_container_element_type(element_type);
-		} else if (all_have_type) {
-			push_error(vformat(R"(Variant array is not compatible with an array of type "%s".)", p_base_type.get_container_element_type().to_string()), p_array_literal);
-		}
+	GDScriptParser::DataType base_element_type;
+	bool has_base_element_type = p_base_type != nullptr && p_base_type->has_container_element_type();
+	if (has_base_element_type) {
+		base_element_type = p_base_type->get_container_element_type();
+		base_element_type.is_constant = false;
 	}
-	// Update the type on the value itself.
-	p_array_literal->set_datatype(array_type);
+
+	if (p_array->elements.size() == 0) {
+		if (has_base_element_type) {
+			array_type.set_container_element_type(base_element_type);
+			p_array->set_datatype(array_type);
+		}
+		return;
+	}
+
+	GDScriptParser::DataType element_type = p_array->elements[0]->get_datatype();
+	if (element_type.has_no_type() || element_type.is_variant()) {
+		return;
+	}
+	for (int i = 1; i < p_array->elements.size(); i++) {
+		GDScriptParser::DataType this_element_type = p_array->elements[i]->get_datatype();
+		if (this_element_type.has_no_type() || this_element_type.is_variant()) {
+			return;
+		}
+		if (is_type_compatible(element_type, this_element_type, false)) {
+			continue;
+		}
+		if (is_type_compatible(this_element_type, element_type, false)) {
+			element_type = this_element_type;
+			continue;
+		}
+		return;
+	}
+
+	if (has_base_element_type && is_type_compatible(base_element_type, element_type, false)) {
+		element_type = base_element_type;
+	}
+
+	element_type.is_constant = false;
+	array_type.set_container_element_type(element_type);
+	p_array->set_datatype(array_type);
 }
 
 void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assignment) {
@@ -1985,8 +1968,8 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 	GDScriptParser::DataType assignee_type = p_assignment->assignee->get_datatype();
 
 	// Check if assigned value is an array literal, so we can make it a typed array too if appropriate.
-	if (assignee_type.has_container_element_type() && p_assignment->assigned_value->type == GDScriptParser::Node::ARRAY) {
-		update_array_literal_element_type(assignee_type, static_cast<GDScriptParser::ArrayNode *>(p_assignment->assigned_value));
+	if (p_assignment->assigned_value->type == GDScriptParser::Node::ARRAY && assignee_type.has_container_element_type()) {
+		update_array_literal_element_type(static_cast<GDScriptParser::ArrayNode *>(p_assignment->assigned_value), &assignee_type);
 	}
 
 	GDScriptParser::DataType assigned_value_type = p_assignment->assigned_value->get_datatype();
@@ -2556,7 +2539,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		for (const KeyValue<int, GDScriptParser::ArrayNode *> &E : arrays) {
 			int index = E.key;
 			if (index < par_types.size() && par_types[index].has_container_element_type()) {
-				update_array_literal_element_type(par_types[index], E.value);
+				update_array_literal_element_type(E.value, &par_types[index]);
 			}
 		}
 		validate_call_arg(par_types, default_arg_count, is_vararg, p_call);
@@ -3408,12 +3391,12 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 			Variant value = p_subscript->base->reduced_value.get(p_subscript->index->reduced_value, &valid);
 			if (!valid) {
 				push_error(vformat(R"(Cannot get index "%s" from "%s".)", p_subscript->index->reduced_value, p_subscript->base->reduced_value), p_subscript->index);
+				result_type.kind = GDScriptParser::DataType::VARIANT;
 			} else {
 				p_subscript->is_constant = true;
 				p_subscript->reduced_value = value;
 				result_type = type_from_variant(value, p_subscript);
 			}
-			result_type.kind = GDScriptParser::DataType::VARIANT;
 		} else {
 			GDScriptParser::DataType base_type = p_subscript->base->get_datatype();
 			GDScriptParser::DataType index_type = p_subscript->index->get_datatype();
@@ -3691,6 +3674,13 @@ void GDScriptAnalyzer::const_fold_array(GDScriptParser::ArrayNode *p_array) {
 	}
 
 	Array array;
+	if (p_array->get_datatype().has_container_element_type()) {
+		const GDScriptParser::DataType &element_type = p_array->get_datatype().get_container_element_type();
+		array.set_typed(
+				element_type.kind == GDScriptParser::DataType::BUILTIN ? element_type.builtin_type : Variant::OBJECT,
+				element_type.native_type,
+				element_type.script_type);
+	}
 	array.resize(p_array->elements.size());
 	for (int i = 0; i < p_array->elements.size(); i++) {
 		array[i] = p_array->elements[i]->reduced_value;
@@ -4189,8 +4179,6 @@ bool GDScriptAnalyzer::is_type_compatible(const GDScriptParser::DataType &p_targ
 
 	if (p_target.kind == GDScriptParser::DataType::BUILTIN) {
 		bool valid = p_source.kind == GDScriptParser::DataType::BUILTIN && p_target.builtin_type == p_source.builtin_type;
-		valid |= p_source.builtin_type == Variant::STRING && p_target.builtin_type == Variant::STRING_NAME;
-		valid |= p_source.builtin_type == Variant::STRING_NAME && p_target.builtin_type == Variant::STRING;
 		if (!valid && p_allow_implicit_conversion) {
 			valid = Variant::can_convert_strict(p_source.builtin_type, p_target.builtin_type);
 		}
@@ -4205,8 +4193,14 @@ bool GDScriptAnalyzer::is_type_compatible(const GDScriptParser::DataType &p_targ
 					// TODO: Maybe this is valid but unsafe?
 					// Variant array can't be appended to typed array.
 					valid = false;
+				} else if (p_allow_implicit_conversion) {
+					valid = is_type_compatible(p_target.get_container_element_type(), p_source.get_container_element_type(), p_allow_implicit_conversion);
 				} else {
-					valid = is_type_compatible(p_target.get_container_element_type(), p_source.get_container_element_type(), false);
+					valid = p_target.get_container_element_type() == p_source.get_container_element_type();
+				}
+			} else {
+				if (p_source.has_container_element_type()) {
+					valid = p_allow_implicit_conversion;
 				}
 			}
 		}

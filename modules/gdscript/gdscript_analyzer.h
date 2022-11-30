@@ -71,7 +71,7 @@ class GDScriptAnalyzer {
 	void resolve_for(GDScriptParser::ForNode *p_for);
 	void resolve_while(GDScriptParser::WhileNode *p_while);
 	void resolve_variable(GDScriptParser::VariableNode *p_variable);
-	void resolve_constant(GDScriptParser::ConstantNode *p_constant);
+	void resolve_constant(GDScriptParser::ConstantNode *p_constant, bool p_is_local = false);
 	void resolve_assert(GDScriptParser::AssertNode *p_assert);
 	void resolve_match(GDScriptParser::MatchNode *p_match);
 	void resolve_match_branch(GDScriptParser::MatchBranchNode *p_match_branch, GDScriptParser::ExpressionNode *p_match_test);

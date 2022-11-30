@@ -726,47 +726,7 @@ void GDScriptAnalyzer::resolve_class_interface(GDScriptParser::ClassNode *p_clas
 			} break;
 			case GDScriptParser::ClassNode::Member::CONSTANT: {
 				check_class_member_name_conflict(p_class, member.constant->identifier->name, member.constant);
-
-				reduce_expression(member.constant->initializer);
-
-				GDScriptParser::DataType specified_type;
-				bool has_specified_type = member.constant->datatype_specifier != nullptr;
-				if (has_specified_type) {
-					specified_type = resolve_datatype(member.constant->datatype_specifier);
-					specified_type.is_meta_type = false;
-				}
-
-				GDScriptParser::DataType datatype;
-				if (member.constant->initializer) {
-					datatype = member.constant->initializer->get_datatype();
-					if (member.constant->initializer->type == GDScriptParser::Node::ARRAY) {
-						GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(member.constant->initializer);
-						update_array_literal_element_type(array, has_specified_type ? &specified_type : nullptr);
-						const_fold_array(array);
-					} else if (member.constant->initializer->type == GDScriptParser::Node::DICTIONARY) {
-						const_fold_dictionary(static_cast<GDScriptParser::DictionaryNode *>(member.constant->initializer));
-					}
-
-					if (!member.constant->initializer->is_constant) {
-						push_error(R"(Initializer for a constant must be a constant expression.)", member.constant->initializer);
-					}
-
-					if (has_specified_type) {
-						datatype = specified_type;
-
-						if (!is_type_compatible(datatype, member.constant->initializer->get_datatype(), true)) {
-							push_error(vformat(R"(Value of type "%s" cannot be initialized to constant of type "%s".)", member.constant->initializer->get_datatype().to_string(), datatype.to_string()), member.constant->initializer);
-						} else if (datatype.builtin_type == Variant::INT && member.constant->initializer->get_datatype().builtin_type == Variant::FLOAT) {
-#ifdef DEBUG_ENABLED
-							parser->push_warning(member.constant->initializer, GDScriptWarning::NARROWING_CONVERSION);
-#endif
-						}
-					}
-				}
-				datatype.is_constant = true;
-
-				member.constant->set_datatype(datatype);
-
+				resolve_constant(member.constant);
 				// Apply annotations.
 				for (GDScriptParser::AnnotationNode *&E : member.constant->annotations) {
 					E->apply(parser, member.constant);
@@ -1063,7 +1023,7 @@ void GDScriptAnalyzer::resolve_node(GDScriptParser::Node *p_node, bool p_is_root
 			resolve_class_body(static_cast<GDScriptParser::ClassNode *>(p_node));
 			break;
 		case GDScriptParser::Node::CONSTANT:
-			resolve_constant(static_cast<GDScriptParser::ConstantNode *>(p_node));
+			resolve_constant(static_cast<GDScriptParser::ConstantNode *>(p_node), true);
 			break;
 		case GDScriptParser::Node::FOR:
 			resolve_for(static_cast<GDScriptParser::ForNode *>(p_node));
@@ -1548,7 +1508,11 @@ void GDScriptAnalyzer::resolve_variable(GDScriptParser::VariableNode *p_variable
 #endif
 }
 
-void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant) {
+void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant, bool p_is_local) {
+	if (p_constant->get_datatype().is_constant) {
+		return;
+	}
+
 	GDScriptParser::DataType type;
 
 	GDScriptParser::DataType explicit_type;
@@ -1601,11 +1565,12 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 	p_constant->set_datatype(type);
 
 #ifdef DEBUG_ENABLED
-	if (p_constant->usages == 0) {
-		parser->push_warning(p_constant, GDScriptWarning::UNUSED_LOCAL_CONSTANT, p_constant->identifier->name);
+	if (p_is_local) {
+		if (p_constant->usages == 0) {
+			parser->push_warning(p_constant, GDScriptWarning::UNUSED_LOCAL_CONSTANT, p_constant->identifier->name);
+		}
+		is_shadowing(p_constant->identifier, "constant");
 	}
-
-	is_shadowing(p_constant->identifier, "constant");
 #endif
 }
 
@@ -2851,10 +2816,10 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 			switch (member.type) {
 				case GDScriptParser::ClassNode::Member::CONSTANT:
 					// For out-of-order resolution:
-					reduce_expression(member.constant->initializer);
+					resolve_constant(member.constant);
+					p_identifier->set_datatype(member.constant->get_datatype());
 					p_identifier->is_constant = true;
 					p_identifier->reduced_value = member.constant->initializer->reduced_value;
-					p_identifier->set_datatype(member.constant->initializer->get_datatype());
 					p_identifier->source = GDScriptParser::IdentifierNode::MEMBER_CONSTANT;
 					p_identifier->constant_source = member.constant;
 					break;
@@ -2897,8 +2862,8 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						case GDScriptParser::ClassNode::Member::CONSTANT: {
 							// TODO: Make sure loops won't cause problem. And make special error message for those.
 							// For out-of-order resolution:
-							reduce_expression(member.constant->initializer);
-							p_identifier->set_datatype(member.get_datatype());
+							resolve_constant(member.constant);
+							p_identifier->set_datatype(member.constant->get_datatype());
 							p_identifier->is_constant = true;
 							p_identifier->reduced_value = member.constant->initializer->reduced_value;
 							return;
@@ -3656,8 +3621,6 @@ void GDScriptAnalyzer::reduce_unary_op(GDScriptParser::UnaryOpNode *p_unary_op) 
 }
 
 void GDScriptAnalyzer::const_fold_array(GDScriptParser::ArrayNode *p_array) {
-	bool all_is_constant = true;
-
 	for (int i = 0; i < p_array->elements.size(); i++) {
 		GDScriptParser::ExpressionNode *element = p_array->elements[i];
 
@@ -3667,8 +3630,7 @@ void GDScriptAnalyzer::const_fold_array(GDScriptParser::ArrayNode *p_array) {
 			const_fold_dictionary(static_cast<GDScriptParser::DictionaryNode *>(element));
 		}
 
-		all_is_constant = all_is_constant && element->is_constant;
-		if (!all_is_constant) {
+		if (!element->is_constant) {
 			return;
 		}
 	}
@@ -3690,8 +3652,6 @@ void GDScriptAnalyzer::const_fold_array(GDScriptParser::ArrayNode *p_array) {
 }
 
 void GDScriptAnalyzer::const_fold_dictionary(GDScriptParser::DictionaryNode *p_dictionary) {
-	bool all_is_constant = true;
-
 	for (int i = 0; i < p_dictionary->elements.size(); i++) {
 		const GDScriptParser::DictionaryNode::Pair &element = p_dictionary->elements[i];
 
@@ -3701,8 +3661,7 @@ void GDScriptAnalyzer::const_fold_dictionary(GDScriptParser::DictionaryNode *p_d
 			const_fold_dictionary(static_cast<GDScriptParser::DictionaryNode *>(element.value));
 		}
 
-		all_is_constant = all_is_constant && element.key->is_constant && element.value->is_constant;
-		if (!all_is_constant) {
+		if (!element.key->is_constant || !element.value->is_constant) {
 			return;
 		}
 	}

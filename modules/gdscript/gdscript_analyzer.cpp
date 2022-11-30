@@ -1523,7 +1523,10 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 	}
 
 	if (p_constant->initializer != nullptr) {
+		constant_context_depth++;
 		reduce_expression(p_constant->initializer);
+		constant_context_depth--;
+
 		if (p_constant->initializer->type == GDScriptParser::Node::ARRAY) {
 			GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(p_constant->initializer);
 			update_array_literal_element_type(array, has_explicit_type ? &explicit_type : nullptr);
@@ -3350,7 +3353,7 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 		}
 		reduce_expression(p_subscript->index);
 
-		if (p_subscript->base->is_constant && p_subscript->index->is_constant) {
+		if (constant_context_depth != 0 && p_subscript->base->is_constant && p_subscript->index->is_constant) {
 			// Just try to get it.
 			bool valid = false;
 			Variant value = p_subscript->base->reduced_value.get(p_subscript->index->reduced_value, &valid);

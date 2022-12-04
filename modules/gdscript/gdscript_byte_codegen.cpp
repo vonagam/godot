@@ -803,7 +803,7 @@ void GDScriptByteCodeGenerator::write_get_member(const Address &p_target, const 
 void GDScriptByteCodeGenerator::write_assign_with_conversion(const Address &p_target, const Address &p_source) {
 	switch (p_target.type.kind) {
 		case GDScriptDataType::BUILTIN: {
-			if (p_target.type.builtin_type == Variant::ARRAY && p_target.type.has_container_element_type()) {
+			if (p_target.type.builtin_type == Variant::ARRAY && (p_target.type.has_container_element_type() || p_source.type.has_container_element_type())) {
 				append(GDScriptFunction::OPCODE_ASSIGN_TYPED_ARRAY, 2);
 				append(p_target);
 				append(p_source);
@@ -845,7 +845,7 @@ void GDScriptByteCodeGenerator::write_assign_with_conversion(const Address &p_ta
 }
 
 void GDScriptByteCodeGenerator::write_assign(const Address &p_target, const Address &p_source) {
-	if (p_target.type.kind == GDScriptDataType::BUILTIN && p_target.type.builtin_type == Variant::ARRAY && p_target.type.has_container_element_type()) {
+	if (p_target.type.kind == GDScriptDataType::BUILTIN && p_target.type.builtin_type == Variant::ARRAY && (p_target.type.has_container_element_type() || p_source.type.has_container_element_type())) {
 		append(GDScriptFunction::OPCODE_ASSIGN_TYPED_ARRAY, 2);
 		append(p_target);
 		append(p_source);

@@ -1,2 +1,2 @@
 GDTEST_ANALYZER_ERROR
-Function with argument type "int" cannot be used as setter for a property of type "String".
+Cannot use "set_prop" as setter: argument type "int" is not compatible with property type "String".

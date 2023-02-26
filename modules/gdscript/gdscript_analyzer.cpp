@@ -1221,56 +1221,52 @@ void GDScriptAnalyzer::resolve_class_body(GDScriptParser::ClassNode *p_class, co
 #endif
 
 			if (member.variable->property == GDScriptParser::VariableNode::PROP_SETGET) {
+				const GDScriptParser::VariableNode *variable = member.variable;
+				const GDScriptParser::DataType &variable_datatype = variable->datatype;
+				bool is_typed_variable = variable_datatype.is_hard_type() && !variable_datatype.is_variant();
+
 				GDScriptParser::FunctionNode *getter_function = nullptr;
 				GDScriptParser::FunctionNode *setter_function = nullptr;
-
 				bool has_valid_getter = false;
 				bool has_valid_setter = false;
 
-				if (member.variable->getter_pointer != nullptr) {
-					if (p_class->has_function(member.variable->getter_pointer->name)) {
-						getter_function = p_class->get_member(member.variable->getter_pointer->name).function;
+				if (variable->getter_pointer != nullptr) {
+					if (p_class->has_function(variable->getter_pointer->name)) {
+						getter_function = p_class->get_member(variable->getter_pointer->name).function;
 					}
 
 					if (getter_function == nullptr) {
-						push_error(vformat(R"(Getter "%s" not found.)", member.variable->getter_pointer->name), member.variable);
+						push_error(vformat(R"(Could not find getter "%s".)", variable->getter_pointer->name), variable);
 					} else {
-						GDScriptParser::DataType return_datatype = getter_function->datatype;
-						if (getter_function->return_type != nullptr) {
-							return_datatype = getter_function->return_type->datatype;
-							return_datatype.is_meta_type = false;
-						}
+						const GDScriptParser::DataType &return_datatype = getter_function->datatype;
 
-						if (getter_function->parameters.size() != 0 || return_datatype.has_no_type()) {
-							push_error(vformat(R"(Function "%s" cannot be used as getter because of its signature.)", getter_function->identifier->name), member.variable);
-						} else if (!is_type_compatible(member.variable->datatype, return_datatype, true)) {
-							push_error(vformat(R"(Function with return type "%s" cannot be used as getter for a property of type "%s".)", return_datatype.to_string(), member.variable->datatype.to_string()), member.variable);
-
+						if (return_datatype.has_no_type()) {
+							push_error(vformat(R"(Could not resolve signature of getter "%s".)", getter_function->identifier->name), variable);
+						} else if (getter_function->parameters.size() != 0) {
+							push_error(vformat(R"(Cannot use "%s" as getter: it has arguments.)", getter_function->identifier->name), variable);
+						} else if (is_typed_variable && !return_datatype.is_hard_type()) {
+							push_error(vformat(R"(Cannot use "%s" as getter: it does not have a set return type.)", getter_function->identifier->name), variable);
+						} else if (is_typed_variable && (return_datatype.is_variant() || !is_type_compatible(variable_datatype, return_datatype, false, variable))) {
+							push_error(vformat(R"(Cannot use "%s" as getter: return type "%s" is not compatible with property type "%s".)", getter_function->identifier->name, return_datatype.to_string(), variable_datatype.to_string()), variable);
 						} else {
 							has_valid_getter = true;
-#ifdef DEBUG_ENABLED
-							if (member.variable->datatype.builtin_type == Variant::INT && return_datatype.builtin_type == Variant::FLOAT) {
-								parser->push_warning(member.variable, GDScriptWarning::NARROWING_CONVERSION);
-							}
-#endif
 						}
 					}
 				}
 
-				if (member.variable->setter_pointer != nullptr) {
-					if (p_class->has_function(member.variable->setter_pointer->name)) {
-						setter_function = p_class->get_member(member.variable->setter_pointer->name).function;
+				if (variable->setter_pointer != nullptr) {
+					if (p_class->has_function(variable->setter_pointer->name)) {
+						setter_function = p_class->get_member(variable->setter_pointer->name).function;
 					}
 
 					if (setter_function == nullptr) {
-						push_error(vformat(R"(Setter "%s" not found.)", member.variable->setter_pointer->name), member.variable);
-
+						push_error(vformat(R"(Could not find setter "%s".)", variable->setter_pointer->name), variable);
+					} else if (setter_function->datatype.has_no_type()) {
+						push_error(vformat(R"(Could not resolve signature of setter "%s".)", setter_function->identifier->name), variable);
 					} else if (setter_function->parameters.size() != 1) {
-						push_error(vformat(R"(Function "%s" cannot be used as setter because of its signature.)", setter_function->identifier->name), member.variable);
-
-					} else if (!is_type_compatible(member.variable->datatype, setter_function->parameters[0]->datatype, true)) {
-						push_error(vformat(R"(Function with argument type "%s" cannot be used as setter for a property of type "%s".)", setter_function->parameters[0]->datatype.to_string(), member.variable->datatype.to_string()), member.variable);
-
+						push_error(vformat(R"(Cannot use "%s" as setter: it should have one argument.)", setter_function->identifier->name), variable);
+					} else if (is_typed_variable && (setter_function->parameters[0]->datatype.is_hard_type() && !is_type_compatible(setter_function->parameters[0]->datatype, variable_datatype, true, variable))) {
+						push_error(vformat(R"(Cannot use "%s" as setter: argument type "%s" is not compatible with property type "%s".)", setter_function->identifier->name, setter_function->parameters[0]->datatype.to_string(), variable_datatype.to_string()), variable);
 					} else {
 						has_valid_setter = true;
 
@@ -1282,10 +1278,8 @@ void GDScriptAnalyzer::resolve_class_body(GDScriptParser::ClassNode *p_class, co
 					}
 				}
 
-				if (member.variable->datatype.is_variant() && has_valid_getter && has_valid_setter) {
-					if (!is_type_compatible(getter_function->datatype, setter_function->parameters[0]->datatype, true)) {
-						push_error(vformat(R"(Getter with type "%s" cannot be used along with setter of type "%s".)", getter_function->datatype.to_string(), setter_function->parameters[0]->datatype.to_string()), member.variable);
-					}
+				if (!is_typed_variable && has_valid_getter && has_valid_setter && !is_type_compatible(getter_function->datatype, setter_function->parameters[0]->datatype, true)) {
+					push_error(vformat(R"(Cannot use a getter of type "%s" along with a setter of type "%s".)", getter_function->datatype.to_string(), setter_function->parameters[0]->datatype.to_string()), member.variable);
 				}
 #ifdef DEBUG_ENABLED
 				parser->ignored_warnings = previously_ignored_warnings;

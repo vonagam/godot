@@ -1,2 +1,2 @@
 GDTEST_ANALYZER_ERROR
-Function with return type "int" cannot be used as getter for a property of type "String".
+Cannot use "get_prop" as getter: it does not have a set return type.

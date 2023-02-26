@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+Cannot use "get_prop" as getter: return type "StringName" is not compatible with property type "String".

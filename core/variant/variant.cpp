@@ -3240,7 +3240,7 @@ uint32_t Variant::recursive_hash(int recursion_count) const {
 }
 
 #define hash_compare_scalar(p_lhs, p_rhs) \
-	(((p_lhs) == (p_rhs)) || (Math::is_nan(p_lhs) && Math::is_nan(p_rhs)))
+	(((p_lhs) == (p_rhs)) && !Math::is_nan(p_lhs))
 
 #define hash_compare_vector2(p_lhs, p_rhs)        \
 	(hash_compare_scalar((p_lhs).x, (p_rhs).x) && \
